@@ -1,0 +1,573 @@
+<div class="app-container">
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-content">
+      <h1 class="app-title">{{ title() }}</h1>
+      <p class="app-subtitle">Encuentra las gasolineras más cercanas con los mejores precios usando datos oficiales del Gobierno de España</p>
+      
+      <!-- Estado de la ubicación -->
+      <div class="location-status-bar">
+        @if (loadingLocation()) {
+          <div class="status-item loading">
+            <span class="spinner"></span> Obteniendo ubicación...
+          </div>
+        } @else if (userLocation()) {
+          <div class="status-item success">
+            <span class="icon">📍</span>
+            <span>{{ getLocationString() }}</span>
+          </div>
+        } @else {
+          <div class="status-item warning">
+            <span class="icon">⚠️</span>
+            <span>Ubicación no establecida</span>
+          </div>
+        }
+        
+        <!-- Estadísticas rápidas -->
+        @if (filteredGasolineras().length > 0) {
+          <div class="stats-summary">
+            <span class="stat-item">{{ filteredGasolineras().length }} resultados</span>
+            @if (nearestGasolinera()) {
+              <span class="stat-item">Más cercana: {{ getFormattedDistance(nearestGasolinera()!.distance) }}</span>
+            }
+            @if (cheapestInRadius()) {
+              <span class="stat-item">Más barata: {{ getCheapestFuelInfo(cheapestInRadius()!) }}</span>
+            }
+          </div>
+        }
+      </div>
+    </div>
+  </header>
+
+  <!-- Control Tabs -->
+  <nav class="control-tabs">
+    <button 
+      type="button" 
+      class="tab-button" 
+      [class.active]="!advancedMode() && !routeMode()"
+      (click)="advancedMode.set(false); routeMode.set(false)">
+      🔍 Búsqueda Básica
+    </button>
+    <button 
+      type="button" 
+      class="tab-button" 
+      [class.active]="advancedMode() && !routeMode()"
+      (click)="toggleAdvancedMode()">
+      ⚙️ Filtros Avanzados
+    </button>
+    <button 
+      type="button" 
+      class="tab-button" 
+      [class.active]="routeMode()"
+      (click)="toggleRouteMode()">
+      🛣️ Búsqueda en Ruta
+    </button>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    
+    <!-- Búsqueda Básica -->
+    @if (!advancedMode() && !routeMode()) {
+      <section class="search-basic">
+        <form [formGroup]="searchForm" class="basic-form">
+          <!-- Ubicación -->
+          <div class="form-section">
+            <h3 class="section-title">📍 Tu Ubicación</h3>
+            <div class="location-controls">
+              <div class="coordinates-row">
+                <div class="input-group">
+                  <label>Latitud</label>
+                  <input 
+                    type="number" 
+                    step="any" 
+                    formControlName="latitude"
+                    placeholder="40.4168"
+                    class="form-control">
+                </div>
+                <div class="input-group">
+                  <label>Longitud</label>
+                  <input 
+                    type="number" 
+                    step="any" 
+                    formControlName="longitude"
+                    placeholder="-3.7038"
+                    class="form-control">
+                </div>
+              </div>
+              
+              <div class="location-buttons">
+                <button type="button" (click)="getCurrentLocationGPS()" class="btn btn-primary" [disabled]="loadingLocation()">
+                  <span class="icon">🎯</span> GPS
+                </button>
+                <button type="button" (click)="getCurrentLocationIP()" class="btn btn-secondary" [disabled]="loadingLocation()">
+                  <span class="icon">🌐</span> IP
+                </button>
+                <button type="button" (click)="onManualLocationSubmit()" class="btn btn-outline">
+                  <span class="icon">📝</span> Manual
+                </button>
+                <button type="button" (click)="loadTestLocations()" class="btn btn-outline">
+                  <span class="icon">🧪</span> Test
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Búsqueda y Radio -->
+          <div class="form-section">
+            <div class="search-row">
+              <div class="input-group flex-grow">
+                <label>Buscar</label>
+                <input 
+                  type="text" 
+                  formControlName="searchTerm"
+                  placeholder="Marca, dirección o municipio..."
+                  class="form-control">
+              </div>
+              <div class="input-group">
+                <label>Radio (km)</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  max="100" 
+                  formControlName="radius"
+                  class="form-control">
+              </div>
+            </div>
+          </div>
+        </form>
+
+        <!-- Filtros Rápidos -->
+        <form [formGroup]="filterForm" class="quick-filters">
+          <div class="filters-row">
+            <div class="input-group">
+              <label>Marca</label>
+              <select formControlName="brand" class="form-select">
+                <option value="">Todas</option>
+                @for (brand of availableBrands(); track brand) {
+                  <option [value]="brand">{{ brand }}</option>
+                }
+              </select>
+            </div>
+            <div class="input-group">
+              <label>Combustible</label>
+              <select formControlName="fuelType" class="form-select">
+                <option value="">Todos</option>
+                @for (fuel of availableFuelTypes(); track fuel) {
+                  <option [value]="fuel">{{ fuel }}</option>
+                }
+              </select>
+            </div>
+            <div class="input-group">
+              <label>Ordenar</label>
+              <select formControlName="sortBy" class="form-select">
+                <option value="distance">Distancia</option>
+                <option value="price">Precio</option>
+                <option value="name">Nombre</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="filter-toggles">
+            <label class="toggle-label">
+              <input type="checkbox" [checked]="onlyOpenStations()" (change)="toggleOnlyOpenStations()">
+              <span class="toggle-text">Solo abiertas</span>
+            </label>
+          </div>
+        </form>
+      </section>
+    }
+
+    <!-- Filtros Avanzados -->
+    @if (advancedMode() && !routeMode()) {
+      <section class="search-advanced">
+        <form [formGroup]="filterForm" class="advanced-form">
+          
+          <!-- Filtros por Ubicación Administrativa -->
+          <div class="form-section">
+            <h3 class="section-title">🏛️ Filtros Administrativos</h3>
+            <div class="admin-filters">
+              <div class="input-group">
+                <label>Comunidad Autónoma</label>
+                <select formControlName="ccaaId" (change)="onCCAAChange($event)" class="form-select">
+                  <option value="">Todas</option>
+                  @for (ccaa of comunidadesAutonomas(); track ccaa.IDCCAA) {
+                    <option [value]="ccaa.IDCCAA">{{ ccaa.CCAA }}</option>
+                  }
+                </select>
+              </div>
+              <div class="input-group">
+                <label>Provincia</label>
+                <select formControlName="provinciaId" (change)="onProvinciaChange($event)" class="form-select">
+                  <option value="">Todas</option>
+                  @for (provincia of provincias(); track provincia.IDProvincia) {
+                    <option [value]="provincia.IDProvincia">{{ provincia.Provincia }}</option>
+                  }
+                </select>
+              </div>
+              <div class="input-group">
+                <label>Municipio</label>
+                <select formControlName="municipioId" class="form-select">
+                  <option value="">Todos</option>
+                  @for (municipio of municipios(); track municipio.IDMunicipio) {
+                    <option [value]="municipio.IDMunicipio">{{ municipio.Municipio }}</option>
+                  }
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Filtros por Empresa -->
+          <div class="form-section">
+            <h3 class="section-title">🏢 Filtros por Empresa</h3>
+            <div class="company-filters">
+              <div class="input-group">
+                <label>Empresas Permitidas (separadas por coma)</label>
+                <input 
+                  type="text" 
+                  formControlName="empresasWhitelist"
+                  placeholder="REPSOL, CEPSA, SHELL..."
+                  class="form-control">
+                <small class="input-help">Solo mostrar estas marcas</small>
+              </div>
+              <div class="input-group">
+                <label>Empresas Excluidas (separadas por coma)</label>
+                <input 
+                  type="text" 
+                  formControlName="empresasBlacklist"
+                  placeholder="MARCA1, MARCA2..."
+                  class="form-control">
+                <small class="input-help">Ocultar estas marcas</small>
+              </div>
+            </div>
+          </div>
+
+          <!-- Filtros por Precio -->
+          <div class="form-section">
+            <h3 class="section-title">💰 Filtros por Precio</h3>
+            <div class="price-filters">
+              <div class="input-group">
+                <label>Precio Mínimo (€/L)</label>
+                <input 
+                  type="number" 
+                  step="0.001" 
+                  min="0" 
+                  max="10" 
+                  formControlName="minPrice"
+                  placeholder="1.000"
+                  class="form-control">
+              </div>
+              <div class="input-group">
+                <label>Precio Máximo (€/L)</label>
+                <input 
+                  type="number" 
+                  step="0.001" 
+                  min="0" 
+                  max="10" 
+                  formControlName="maxPrice"
+                  placeholder="2.000"
+                  class="form-control">
+              </div>
+              <div class="input-group">
+                <label>Máximo Resultados</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  max="500" 
+                  formControlName="maxResults"
+                  class="form-control">
+              </div>
+            </div>
+          </div>
+
+          <!-- Controles Avanzados -->
+          <div class="form-section">
+            <div class="advanced-controls">
+              <button type="button" (click)="resetFilters()" class="btn btn-outline">
+                🔄 Limpiar Filtros
+              </button>
+              <button type="button" (click)="exportResults()" class="btn btn-secondary" [disabled]="filteredGasolineras().length === 0">
+                📥 Exportar Resultados
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+    }
+
+    <!-- Búsqueda en Ruta -->
+    @if (routeMode()) {
+      <section class="search-route">
+        <form [formGroup]="routeForm" class="route-form">
+          <div class="form-section">
+            <h3 class="section-title">🛣️ Definir Ruta</h3>
+            
+            <div class="route-points">
+              <div class="route-point">
+                <h4>📍 Punto de Origen</h4>
+                <div class="coordinates-row">
+                  <div class="input-group">
+                    <label>Latitud</label>
+                    <input type="number" step="any" formControlName="startLat" class="form-control">
+                  </div>
+                  <div class="input-group">
+                    <label>Longitud</label>
+                    <input type="number" step="any" formControlName="startLon" class="form-control">
+                  </div>
+                </div>
+              </div>
+              
+              <div class="route-arrow">➡️</div>
+              
+              <div class="route-point">
+                <h4>🏁 Punto de Destino</h4>
+                <div class="coordinates-row">
+                  <div class="input-group">
+                    <label>Latitud</label>
+                    <input type="number" step="any" formControlName="endLat" class="form-control">
+                  </div>
+                  <div class="input-group">
+                    <label>Longitud</label>
+                    <input type="number" step="any" formControlName="endLon" class="form-control">
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="route-config">
+              <div class="input-group">
+                <label>Desvío Máximo (km)</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  max="50" 
+                  formControlName="maxDetour"
+                  class="form-control">
+                <small class="input-help">Máxima distancia de desvío aceptable de la ruta directa</small>
+              </div>
+              <button type="button" (click)="searchInRoute()" class="btn btn-primary" [disabled]="!routeForm.valid || loading()">
+                🔍 Buscar en Ruta
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+    }
+
+    <!-- Loading State -->
+    @if (loading()) {
+      <div class="loading-section">
+        <div class="loading-spinner"></div>
+        <p>Cargando datos de gasolineras...</p>
+      </div>
+    }
+
+    <!-- Error State -->
+    @if (error()) {
+      <div class="error-section">
+        <div class="error-message">
+          <span class="error-icon">❌</span>
+          <span class="error-text">{{ error() }}</span>
+        </div>
+      </div>
+    }
+
+    <!-- Results Section -->
+    @if (!loading() && filteredGasolineras().length > 0) {
+      <section class="results-section">
+        
+        <!-- Destacados -->
+        @if (nearestGasolinera() || cheapestInRadius() || priceStats()) {
+          <div class="highlights-section">
+            <h3 class="section-title">⭐ Destacados</h3>
+            <div class="highlights-grid">
+              
+              @if (nearestGasolinera()) {
+                <div class="highlight-card nearest">
+                  <div class="highlight-icon">🎯</div>
+                  <div class="highlight-content">
+                    <h4>Más Cercana</h4>
+                    <p class="highlight-name">{{ nearestGasolinera()!['Rótulo'] }}</p>
+                    <p class="highlight-detail">{{ getFormattedDistance(nearestGasolinera()!.distance) }}</p>
+                    <p class="highlight-address">{{ nearestGasolinera()!['Dirección'] }}, {{ nearestGasolinera()!.Municipio }}</p>
+                  </div>
+                </div>
+              }
+              
+              @if (cheapestInRadius()) {
+                <div class="highlight-card cheapest">
+                  <div class="highlight-icon">💰</div>
+                  <div class="highlight-content">
+                    <h4>Más Barata en Radio</h4>
+                    <p class="highlight-name">{{ cheapestInRadius()!['Rótulo'] }}</p>
+                    <p class="highlight-detail">{{ getCheapestFuelInfo(cheapestInRadius()!) }}</p>
+                    <p class="highlight-address">{{ cheapestInRadius()!['Dirección'] }}, {{ cheapestInRadius()!.Municipio }}</p>
+                  </div>
+                </div>
+              }
+              
+              @if (priceStats()) {
+                <div class="highlight-card stats">
+                  <div class="highlight-icon">📊</div>
+                  <div class="highlight-content">
+                    <h4>Estadísticas de Precio</h4>
+                    <p class="highlight-detail">Min: {{ priceStats()!.min.toFixed(3) }} €/L</p>
+                    <p class="highlight-detail">Max: {{ priceStats()!.max.toFixed(3) }} €/L</p>
+                    <p class="highlight-detail">Promedio: {{ priceStats()!.avg.toFixed(3) }} €/L</p>
+                  </div>
+                </div>
+              }
+              
+            </div>
+          </div>
+        }
+
+        <!-- Lista de Resultados -->
+        <div class="results-list">
+          <h3 class="section-title">🗂️ Resultados ({{ filteredGasolineras().length }})</h3>
+          
+          <div class="results-grid">
+            @for (gasolinera of filteredGasolineras(); track gasolinera.IDEESS) {
+              <div class="gasolinera-card" 
+                   [class.nearest]="gasolinera === nearestGasolinera()"
+                   [class.cheapest]="gasolinera === cheapestInRadius()">
+                
+                <!-- Header de la Tarjeta -->
+                <div class="card-header">
+                  <h4 class="card-title">{{ gasolinera['Rótulo'] || 'Sin nombre' }}</h4>
+                  <div class="card-badges">
+                    @if (gasolinera === nearestGasolinera()) {
+                      <span class="badge nearest">MÁS CERCANA</span>
+                    }
+                    @if (gasolinera === cheapestInRadius()) {
+                      <span class="badge cheapest">MÁS BARATA</span>
+                    }
+                    @if (gasolinera.isOpen !== undefined) {
+                      <span class="badge" [class]="getOpenStatus(gasolinera.Horario).color">
+                        {{ getOpenStatus(gasolinera.Horario).text }}
+                      </span>
+                    }
+                  </div>
+                </div>
+
+                <!-- Información Principal -->
+                <div class="card-content">
+                  <div class="card-info">
+                    <p class="address">
+                      <span class="icon">📍</span>
+                      {{ gasolinera['Dirección'] }}
+                    </p>
+                    <p class="location">
+                      <span class="icon">🏙️</span>
+                      {{ gasolinera.Municipio }}, {{ gasolinera.Provincia }}
+                    </p>
+                    @if (gasolinera.distance !== undefined) {
+                      <p class="distance">
+                        <span class="icon">📏</span>
+                        {{ getFormattedDistance(gasolinera.distance) }}
+                      </p>
+                    }
+                    <p class="schedule">
+                      <span class="icon">🕒</span>
+                      {{ gasolinera.Horario || 'Horario no disponible' }}
+                    </p>
+                    @if (gasolinera.cheapestFuel) {
+                      <p class="best-price">
+                        <span class="icon">💰</span>
+                        Mejor precio: {{ getCheapestFuelInfo(gasolinera) }}
+                      </p>
+                    }
+                  </div>
+
+                  <!-- Precios -->
+                  <div class="prices-grid">
+                    @if (gasolinera['Precio Gasolina 95 E5']) {
+                      <div class="price-item">
+                        <span class="fuel-name">Gasolina 95</span>
+                        <span class="fuel-price">{{ getFormattedPrice(gasolinera['Precio Gasolina 95 E5']) }}</span>
+                      </div>
+                    }
+                    @if (gasolinera['Precio Gasolina 98 E5']) {
+                      <div class="price-item">
+                        <span class="fuel-name">Gasolina 98</span>
+                        <span class="fuel-price">{{ getFormattedPrice(gasolinera['Precio Gasolina 98 E5']) }}</span>
+                      </div>
+                    }
+                    @if (gasolinera['Precio Gasoleo A']) {
+                      <div class="price-item">
+                        <span class="fuel-name">Gasóleo A</span>
+                        <span class="fuel-price">{{ getFormattedPrice(gasolinera['Precio Gasoleo A']) }}</span>
+                      </div>
+                    }
+                    @if (gasolinera['Precio Gasoleo B']) {
+                      <div class="price-item">
+                        <span class="fuel-name">Gasóleo B</span>
+                        <span class="fuel-price">{{ getFormattedPrice(gasolinera['Precio Gasoleo B']) }}</span>
+                      </div>
+                    }
+                    @if (gasolinera['Precio GLP']) {
+                      <div class="price-item">
+                        <span class="fuel-name">GLP</span>
+                        <span class="fuel-price">{{ getFormattedPrice(gasolinera['Precio GLP']) }}</span>
+                      </div>
+                    }
+                    @if (gasolinera['Precio GNC']) {
+                      <div class="price-item">
+                        <span class="fuel-name">GNC</span>
+                        <span class="fuel-price">{{ getFormattedPrice(gasolinera['Precio GNC']) }}</span>
+                      </div>
+                    }
+                  </div>
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+      </section>
+    }
+
+    <!-- Empty State -->
+    @if (!loading() && filteredGasolineras().length === 0 && gasolineras().length > 0) {
+      <div class="empty-state">
+        <div class="empty-icon">🔍</div>
+        <h3>No se encontraron resultados</h3>
+        <p>Prueba a ampliar el radio de búsqueda o cambiar los filtros.</p>
+        <button type="button" (click)="resetFilters()" class="btn btn-primary">
+          🔄 Limpiar Filtros
+        </button>
+      </div>
+    }
+
+    <!-- No Data State -->
+    @if (!loading() && gasolineras().length === 0) {
+      <div class="no-data-state">
+        <div class="empty-icon">📶</div>
+        <h3>No hay datos disponibles</h3>
+        <p>No se pudieron cargar los datos de gasolineras. Verifica tu conexión a internet.</p>
+        <button type="button" (click)="reloadData()" class="btn btn-primary">
+          🔄 Reintentar
+        </button>
+      </div>
+    }
+    
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div class="footer-content">
+      <p class="footer-text">
+        Datos oficiales del <strong>Ministerio de Industria, Comercio y Turismo</strong> del Gobierno de España
+      </p>
+      <p class="footer-links">
+        <a href="https://energia.serviciosmin.gob.es" target="_blank" rel="noopener">
+          🔗 API Oficial
+        </a>
+        |
+        <span class="update-time">
+            Última actualización: {{ getCurrentTime() }}
+        </span>
+      </p>
+    </div>
+  </footer>
+
+</div>
