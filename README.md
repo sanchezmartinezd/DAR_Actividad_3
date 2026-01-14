@@ -82,7 +82,7 @@ apiGobOil/
 
 1. **Clonar y acceder al directorio**:
    ```bash
-   git clone [url-del-repositorio]
+   git clone https://github.com/sanchezmartinezd/DAR_Actividad_3.git
    cd apiGobOil
    ```
 
